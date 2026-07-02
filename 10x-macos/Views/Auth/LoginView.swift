@@ -327,6 +327,28 @@ struct LoginView: View {
                 }
                 .frame(maxWidth: .infinity)
             }
+
+            if AuthManager.isLocalDevModeAvailable {
+                Button {
+                    auth.continueLocally()
+                } label: {
+                    Text("Continue locally (no account)")
+                        .font(Theme.geist(12, weight: .medium))
+                        .foregroundStyle(Theme.textSecondary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
+                        .contentShape(
+                            RoundedRectangle(cornerRadius: Self.authButtonCornerRadius, style: .continuous)
+                        )
+                }
+                .buttonStyle(.plain)
+                .background(
+                    RoundedRectangle(cornerRadius: Self.authButtonCornerRadius, style: .continuous)
+                        .stroke(Color.white.opacity(0.12), lineWidth: 1)
+                )
+                .disabled(isAuthenticating)
+                .help("Skips sign-in for local development. Requires the local backend from local-backend/ on port 8000.")
+            }
         }
         .frame(maxWidth: .infinity)
     }

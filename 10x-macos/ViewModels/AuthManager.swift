@@ -62,6 +62,8 @@ final class AuthManager {
     private let refreshTokenKey = "tenx_refresh_token"
     private let userIdKey = "tenx_user_id"
     private let userEmailKey = "tenx_user_email"
+    private static let localDevModeKey = "tenx_local_dev_mode"
+    private static let localDevAccessToken = "tenx-local-dev-token"
     private let callbackScheme = "app.10x.macos"
     private let callbackURLString = "app.10x.macos://auth/callback"
     private let authTokenStore = AuthTokenStore()
@@ -75,11 +77,32 @@ final class AuthManager {
         activeSignInProvider != nil
     }
 
+    /// Local development mode: skips Supabase auth entirely so the app can run
+    /// against a local backend without hosted credentials. DEBUG builds only.
+    nonisolated static var isLocalDevModeAvailable: Bool {
+#if DEBUG
+        true
+#else
+        false
+#endif
+    }
+
+    var isLocalDevSession: Bool {
+        accessToken == Self.localDevAccessToken
+    }
+
     var signInStatusMessage: String? {
         activeSignInProvider?.progressMessage
     }
 
     init() {
+        if Self.isLocalDevModeAvailable, UserDefaults.standard.bool(forKey: Self.localDevModeKey) {
+            accessToken = Self.localDevAccessToken
+            userId = "local-dev"
+            isAuthenticated = true
+            return
+        }
+
         startAuthStateObserver()
 
         if let saved = authTokenStore.string(for: tokenKey, allowUserInteraction: false), !saved.isEmpty {
@@ -111,6 +134,19 @@ final class AuthManager {
 
     func signInWithGoogle() {
         startOAuthSignIn(provider: .google)
+    }
+
+    /// DEBUG-only: continue without an account for local development against
+    /// a local backend (see `local-backend/`). No Supabase calls are made.
+    func continueLocally() {
+        guard Self.isLocalDevModeAvailable else { return }
+        UserDefaults.standard.set(true, forKey: Self.localDevModeKey)
+        accessToken = Self.localDevAccessToken
+        refreshToken = nil
+        userId = "local-dev"
+        userEmail = nil
+        authError = nil
+        isAuthenticated = true
     }
 
     private func startOAuthSignIn(provider: SignInProvider) {
@@ -408,6 +444,10 @@ final class AuthManager {
     func validAccessToken() async -> String? {
         guard let accessToken, !accessToken.isEmpty else {
             return nil
+        }
+
+        if isLocalDevSession {
+            return accessToken
         }
 
         if !Self.isJWTExpiredOrNearExpiry(accessToken, leewaySeconds: Self.accessTokenRefreshLeewaySeconds) {
@@ -761,6 +801,7 @@ final class AuthManager {
     }
 
     func handleUnauthorized() async {
+        guard !isLocalDevSession else { return }
         let refreshed = await refreshSession()
         if !refreshed {
             signOut()
@@ -768,7 +809,10 @@ final class AuthManager {
     }
 
     func signOut() {
+        let wasLocalDevSession = isLocalDevSession
+        UserDefaults.standard.removeObject(forKey: Self.localDevModeKey)
         clearSessionState()
+        guard !wasLocalDevSession else { return }
         Task {
             await SupabaseService.shared.signOut()
         }
